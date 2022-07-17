@@ -7,7 +7,7 @@ use bevy::input::Input;
 use bevy::math::Vec2;
 use bevy::prelude::{
     Color, Commands, KeyCode, Mut, OrthographicCameraBundle, Query, Res, ResMut, Sprite,
-    SpriteBundle, Timer, Transform, Vec3, With, Entity,
+    SpriteBundle, Timer, Transform, Vec3, With, Entity, Without,
 };
 use bevy::utils::default;
 use bevy::DefaultPlugins;
@@ -25,11 +25,14 @@ struct UpdateTimer(Timer);
 struct SnakeLength(usize);
 
 #[derive(Component)]
+struct SnakeTail;
+
+#[derive(Component)]
 struct SnakeHead {
     direction: Direction,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 struct SnakePart {
     index: usize,
     life_counter: u32,
@@ -38,7 +41,7 @@ struct SnakePart {
 #[derive(Component)]
 struct Apple;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug)]
 struct Pos {
     x: i32,
     y: i32,
@@ -128,6 +131,7 @@ fn update(
     snake_head_info: Query<(Entity, &SnakeHead, &Pos)>,
     mut snake_length: ResMut<SnakeLength>,
     mut snake_parts: Query<(&mut SnakePart, Entity)>,
+    mut apple: Query<&mut Pos, (With<Apple>, Without<SnakeHead>)>,
 ) {
     if update_timer.0.tick(time.delta()).just_finished() {
         println!("Starting new update sequence");
@@ -157,8 +161,8 @@ fn update(
             .entity(entity)
             .remove::<SnakeHead>();
 
-        // Spawning new head entity
-        commands
+        // Spawning new head entity, WARNING, from here all previous data about the head (head_pos, entity) changed
+        let new_head_entity = commands
             .spawn()
             .insert_bundle((next_pos, SnakePart { index: 0, life_counter: snake_length.0 as u32 }, SnakeHead { direction: snake_head.direction }))
             .insert_bundle(SpriteBundle {
@@ -172,12 +176,32 @@ fn update(
                     ..default()
                 },
                 ..default()
-            });
+            }).id();
 
+        println!("Decreasing all life_counter and increasing index");
         // Decrease all life_counter and increasing all index
         for (mut snake_part, _) in snake_parts.iter_mut() {
             snake_part.index += 1;
             snake_part.life_counter -= 1; // Can overflow, we have to remove entity with a life_counter of 0
+            println!("index: {:?}, life_counter: {:?}", snake_part.index, snake_part.life_counter)
+        }
+
+        let mut apple_pos = apple.iter_mut().next().unwrap();
+
+        // Check if snake head is on the apple, if yes we increase by 1 each life_counter to prevent last snake part to be despawned
+        if next_pos.x == apple_pos.x && next_pos.y == apple_pos.y {
+            snake_length.0 += 1;
+            // Calculating new pos for apple
+            let x = fastrand::i32(-10..11);
+            let y = fastrand::i32(-10..11);
+            apple_pos.x = x;
+            apple_pos.y = y;
+            println!("Detected head on the apple, increasing life_counter");
+            for (mut snake_part, _) in snake_parts.iter_mut() { // ERROR : New head life counter is not increased !!
+                snake_part.life_counter += 1;
+                println!("index: {:?}, life_counter: {:?}", snake_part.index, snake_part.life_counter)
+            }
+            commands.entity(new_head_entity).remove::<SnakePart>().insert(SnakePart { index: 0, life_counter: snake_length.0 as u32 });
         }
 
         // Remove each part with a life_counter of 0
@@ -188,5 +212,8 @@ fn update(
                     .despawn();
             }
         }
+
+        
+
     }
 }
